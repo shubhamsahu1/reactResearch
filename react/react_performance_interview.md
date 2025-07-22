@@ -183,28 +183,349 @@ How would you optimize this component?
 
 ---
 
-## Expected Answers Summary
+## Detailed Answers
 
-**For Virtualization:**
-- Understands windowing concept
-- Knows libraries like react-window/react-virtualized
-- Can explain viewport calculations
-- Understands trade-offs (complexity vs performance)
+### 1. Virtualization and Large Datasets - Answers
 
-**For Code Splitting:**
-- Knows React.lazy() and Suspense
-- Understands dynamic imports
-- Can implement route-based and component-based splitting
-- Understands webpack chunks and loading strategies
+**Basic Level Answer:**
+Virtualization (or windowing) is a technique where only the visible items in a list are rendered to the DOM, rather than rendering all items at once. For large datasets, this dramatically improves performance by:
+- Reducing initial render time
+- Minimizing DOM nodes
+- Improving scroll performance
+- Reducing memory usage
 
-**For useTransition:**
-- Understands concurrent features
-- Knows difference between urgent/non-urgent updates
-- Can implement proper loading states
-- Understands startTransition and isPending
+The difference between 10,000 DOM elements vs virtualized:
+- **Without virtualization:** All 10,000 elements exist in DOM, causing high memory usage and slow interactions
+- **With virtualization:** Only ~20-50 visible elements exist in DOM, with virtual scrolling simulating the full list
 
-**For Performance Identification:**
-- Knows common anti-patterns
-- Can use React DevTools Profiler
-- Understands memoization techniques
-- Can identify expensive operations in render cycles
+**Intermediate Level Answer:**
+For 50,000 rows, I would:
+1. **Implement react-window or react-virtualized**
+2. **Calculate item height** (fixed or dynamic)
+3. **Determine viewport size** and visible items
+4. **Add buffer items** above/below viewport for smooth scrolling
+
+```javascript
+import { FixedSizeList as List } from 'react-window';
+
+function VirtualizedTable({ data }) {
+  const Row = ({ index, style }) => (
+    <div style={style}>
+      <ProductCard product={data[index]} />
+    </div>
+  );
+
+  return (
+    <List
+      height={600}
+      itemCount={data.length}
+      itemSize={80}
+      overscanCount={5}
+    >
+      {Row}
+    </List>
+  );
+}
+```
+
+**Libraries and Trade-offs:**
+- **react-window:** Lighter, better performance
+- **react-virtualized:** More features, heavier
+- **Trade-offs:** Complexity vs performance, loss of native scrolling features, SEO challenges
+
+---
+
+### 2. Code Splitting and Initial Load Time - Answers
+
+**Basic Level Answer:**
+Code splitting divides your bundle into smaller chunks that load on-demand, improving initial load time by:
+- Reducing initial bundle size
+- Loading only necessary code upfront
+- Lazy loading features when needed
+
+**Static vs Dynamic imports:**
+```javascript
+// Static import - included in initial bundle
+import HomePage from './HomePage';
+
+// Dynamic import - creates separate chunk
+const HomePage = lazy(() => import('./HomePage'));
+```
+
+**Intermediate Level Answer:**
+For 2MB bundle optimization:
+
+```javascript
+import { lazy, Suspense } from 'react';
+
+// Route-based splitting
+const HomePage = lazy(() => import('./pages/HomePage'));
+const ProductsPage = lazy(() => import('./pages/ProductsPage'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const CheckoutFlow = lazy(() => import('./pages/CheckoutFlow'));
+
+function App() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/products" element={<ProductsPage />} />
+        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/checkout" element={<CheckoutFlow />} />
+      </Routes>
+    </Suspense>
+  );
+}
+```
+
+**E-commerce Splitting Strategy:**
+1. **Home page:** Keep in main bundle (always needed)
+2. **Product catalog:** Separate chunk (frequently used)
+3. **Admin dashboard:** Separate chunk with preload for admin users
+4. **Checkout flow:** Separate chunk, preload on cart interaction
+
+**Advanced Level Answer:**
+Error handling and chunk loading:
+
+```javascript
+const LazyComponent = lazy(() => 
+  import('./Component').catch(() => ({
+    default: () => <div>Failed to load component</div>
+  }))
+);
+
+// Error boundary for chunk failures
+class ChunkErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <div>Something went wrong. <button onClick={() => window.location.reload()}>Reload</button></div>;
+    }
+    return this.props.children;
+  }
+}
+```
+
+---
+
+### 3. useTransition Hook and Perceived Performance - Answers
+
+**Basic Level Answer:**
+`useTransition` is a React 18 hook that lets you mark state updates as non-urgent transitions, improving perceived performance by:
+- Keeping the UI responsive during expensive updates
+- Allowing urgent updates (like typing) to interrupt non-urgent ones
+- Providing loading states for better UX
+
+**Urgent vs Non-urgent updates:**
+- **Urgent:** User interactions like typing, clicking, hovering
+- **Non-urgent:** Data fetching, filtering large lists, complex calculations
+
+**Intermediate Level Answer:**
+For the search interface lag:
+
+```javascript
+import { useTransition, useDeferredValue, useState } from 'react';
+
+function SearchResults({ query }) {
+  const [results, setResults] = useState([]);
+  const [isPending, startTransition] = useTransition();
+  const deferredQuery = useDeferredValue(query);
+  
+  useEffect(() => {
+    startTransition(() => {
+      const filteredResults = heavyFilter(allData, deferredQuery);
+      setResults(filteredResults);
+    });
+  }, [deferredQuery]);
+  
+  return (
+    <div>
+      {isPending && <div>Updating results...</div>}
+      {results.map(result => <ResultItem key={result.id} item={result} />)}
+    </div>
+  );
+}
+```
+
+**Advanced Level Answer:**
+`useTransition` vs `useDeferredValue`:
+- **useTransition:** Wraps state updates, provides isPending flag
+- **useDeferredValue:** Defers a value, useful for props from parent components
+
+Dashboard implementation:
+```javascript
+function Dashboard({ dateRange }) {
+  const [isPending, startTransition] = useTransition();
+  const [quickData, setQuickData] = useState(null);
+  const [expensiveData, setExpensiveData] = useState(null);
+  
+  useEffect(() => {
+    // Urgent update for quick widgets
+    setQuickData(getQuickData(dateRange));
+    
+    // Non-urgent update for expensive widgets
+    startTransition(() => {
+      setExpensiveData(getExpensiveData(dateRange));
+    });
+  }, [dateRange]);
+  
+  return (
+    <div>
+      <QuickCharts data={quickData} />
+      {isPending ? (
+        <div>Updating tables...</div>
+      ) : (
+        <ExpensiveDataTable data={expensiveData} />
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+### 4. Identifying Expensive Computations - Answers
+
+**Basic Level Answer:**
+Common performance anti-patterns:
+- Creating objects/arrays in render
+- Inline function definitions as props
+- Complex calculations without memoization
+- Unnecessary re-renders due to reference changes
+
+**Code Review Answer:**
+Problems with the UserProfile component:
+- `filter()` and `sort()` run on every render
+- Creates new arrays each time
+- No memoization
+
+**Fixed version:**
+```javascript
+function UserProfile({ user, allUsers }) {
+  const sortedFriends = useMemo(() => {
+    const friends = allUsers.filter(u => user.friendIds.includes(u.id));
+    return friends.sort((a, b) => a.name.localeCompare(b.name));
+  }, [allUsers, user.friendIds]);
+  
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      {sortedFriends.map(friend => (
+        <div key={friend.id}>{friend.name}</div>
+      ))}
+    </div>
+  );
+}
+```
+
+**Intermediate Level Answer:**
+Using React DevTools Profiler:
+1. Open React DevTools → Profiler tab
+2. Click record and interact with your app
+3. Stop recording and analyze the flame graph
+4. Look for components with long render times
+5. Identify components that render frequently
+6. Check "why did this render" information
+
+**Optimization for ExpensiveComponent:**
+```javascript
+function ExpensiveComponent({ data, filterType, sortOrder }) {
+  const processedData = useMemo(() => {
+    return data
+      .filter(item => item.type === filterType)
+      .map(item => ({
+        ...item,
+        displayName: formatName(item.firstName, item.lastName),
+        age: calculateAge(item.birthDate)
+      }))
+      .sort((a, b) => sortOrder === 'asc' ? a.age - b.age : b.age - a.age);
+  }, [data, filterType, sortOrder]);
+  
+  return (
+    <div>
+      {processedData.map(item => (
+        <UserCard key={item.id} user={item} />
+      ))}
+    </div>
+  );
+}
+```
+
+**Advanced Level Answer:**
+Performance implications:
+- **Object creation:** `style={{color: 'red'}}` creates new object each render
+- **Inline functions:** `onClick={() => handleClick()}` creates new function each render
+- **Complex calculations:** Should be memoized with `useMemo`
+- **Conditional rendering:** Use `&&` carefully, prefer early returns
+
+**Form Component Debugging:**
+1. **Use React Profiler** to identify slow components
+2. **Check for unnecessary re-renders** in field components
+3. **Memoize validation functions** with `useCallback`
+4. **Debounce auto-save** functionality
+5. **Split form into smaller components** with `memo()`
+6. **Use uncontrolled components** where possible
+
+**Tools and Techniques:**
+- React DevTools Profiler
+- Chrome DevTools Performance tab
+- Lighthouse audits
+- Bundle analyzers (webpack-bundle-analyzer)
+- Performance.mark() and Performance.measure()
+- React.memo(), useMemo(), useCallback()
+
+---
+
+## Bonus Questions - Answers
+
+### Memory Leaks and Cleanup
+**Common scenarios and solutions:**
+```javascript
+// Event listeners
+useEffect(() => {
+  const handler = () => {};
+  window.addEventListener('scroll', handler);
+  return () => window.removeEventListener('scroll', handler);
+}, []);
+
+// Timers
+useEffect(() => {
+  const timer = setInterval(() => {}, 1000);
+  return () => clearInterval(timer);
+}, []);
+
+// Subscriptions
+useEffect(() => {
+  const subscription = api.subscribe(callback);
+  return () => subscription.unsubscribe();
+}, []);
+```
+
+### Bundle Analysis
+```bash
+# Analyze bundle size
+npx webpack-bundle-analyzer build/static/js/*.js
+
+# Check for duplicate dependencies
+npm ls --depth=0
+
+# Use source-map-explorer
+npx source-map-explorer build/static/js/*.js
+```
+
+### Measuring Performance
+**Key metrics to track:**
+- First Contentful Paint (FCP)
+- Largest Contentful Paint (LCP)
+- Time to Interactive (TTI)
+- Bundle size and chunks
+- Memory usage over time
+- React component render times

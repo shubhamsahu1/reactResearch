@@ -139,13 +139,472 @@ sharedWorker.port.onmessage = function(e) {
 
 Special type for background services, caching, and offline functionality:
 
+#### Service Worker Registration and Basic Setup
+
 ```javascript
-// Register service worker
+// main.js - Register service worker
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('service-worker.js')
-        .then(registration => console.log('SW registered'))
-        .catch(error => console.log('SW registration failed'));
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+            .then(registration => {
+                console.log('SW registered: ', registration);
+                
+                // Listen for updates
+                registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            // New version available
+                            showUpdateNotification();
+                        }
+                    });
+                });
+            })
+            .catch(registrationError => {
+                console.log('SW registration failed: ', registrationError);
+            });
+    });
 }
+
+function showUpdateNotification() {
+    if (confirm('New version available! Reload to update?')) {
+        window.location.reload();
+    }
+}
+
+// Communication with service worker
+navigator.serviceWorker.ready.then(registration => {
+    // Send message to service worker
+    registration.active.postMessage({
+        command: 'SKIP_WAITING'
+    });
+});
+
+// Listen for messages from service worker
+navigator.serviceWorker.addEventListener('message', event => {
+    console.log('Message from SW:', event.data);
+    
+    if (event.data.type === 'CACHE_UPDATED') {
+        showNotification('App updated and ready to use offline!');
+    }
+});
+```
+
+#### Complete Service Worker Implementation
+
+```javascript
+// service-worker.js
+const CACHE_NAME = 'my-app-v1.2.0';
+const RUNTIME_CACHE = 'runtime-cache-v1';
+
+// Files to cache for offline functionality
+const STATIC_ASSETS = [
+    '/',
+    '/index.html',
+    '/styles/main.css',
+    '/scripts/app.js',
+    '/images/logo.png',
+    '/manifest.json',
+    '/offline.html'
+];
+
+// API endpoints to cache
+const API_CACHE_PATTERNS = [
+    /^https:\/\/api\.example\.com\/users/,
+    /^https:\/\/api\.example\.com\/posts/
+];
+
+// Install event - cache static assets
+self.addEventListener('install', event => {
+    console.log('Service Worker installing...');
+    
+    event.waitUntil(
+        caches.open(CACHE_NAME)
+            .then(cache => {
+                console.log('Caching static assets');
+                return cache.addAll(STATIC_ASSETS);
+            })
+            .then(() => {
+                // Force activation of new service worker
+                return self.skipWaiting();
+            })
+    );
+});
+
+// Activate event - cleanup old caches
+self.addEventListener('activate', event => {
+    console.log('Service Worker activating...');
+    
+    event.waitUntil(
+        caches.keys().then(cacheNames => {
+            return Promise.all(
+                cacheNames.map(cacheName => {
+                    // Delete old caches
+                    if (cacheName !== CACHE_NAME && cacheName !== RUNTIME_CACHE) {
+                        console.log('Deleting old cache:', cacheName);
+                        return caches.delete(cacheName);
+                    }
+                })
+            );
+        }).then(() => {
+            // Take control of all pages
+            return self.clients.claim();
+        }).then(() => {
+            // Notify all clients that cache is updated
+            return self.clients.matchAll().then(clients => {
+                clients.forEach(client => {
+                    client.postMessage({
+                        type: 'CACHE_UPDATED',
+                        version: CACHE_NAME
+                    });
+                });
+            });
+        })
+    );
+});
+
+// Fetch event - implement caching strategies
+self.addEventListener('fetch', event => {
+    const { request } = event;
+    const url = new URL(request.url);
+    
+    // Handle different types of requests with different strategies
+    if (request.destination === 'document') {
+        // HTML pages - Network first, cache fallback
+        event.respondWith(networkFirstStrategy(request));
+    } else if (request.destination === 'image') {
+        // Images - Cache first, network fallback
+        event.respondWith(cacheFirstStrategy(request));
+    } else if (API_CACHE_PATTERNS.some(pattern => pattern.test(request.url))) {
+        // API calls - Stale while revalidate
+        event.respondWith(staleWhileRevalidateStrategy(request));
+    } else if (request.destination === 'script' || request.destination === 'style') {
+        // CSS/JS - Cache first
+        event.respondWith(cacheFirstStrategy(request));
+    } else {
+        // Default - Network first
+        event.respondWith(networkFirstStrategy(request));
+    }
+});
+
+// Caching Strategies
+
+// Network First - Try network, fallback to cache
+async function networkFirstStrategy(request) {
+    try {
+        const networkResponse = await fetch(request);
+        
+        if (networkResponse.ok) {
+            // Cache successful responses
+            const cache = await caches.open(RUNTIME_CACHE);
+            cache.put(request, networkResponse.clone());
+        }
+        
+        return networkResponse;
+    } catch (error) {
+        console.log('Network failed, trying cache:', error);
+        
+        const cachedResponse = await caches.match(request);
+        if (cachedResponse) {
+            return cachedResponse;
+        }
+        
+        // Return offline page for navigation requests
+        if (request.destination === 'document') {
+            return caches.match('/offline.html');
+        }
+        
+        throw error;
+    }
+}
+
+// Cache First - Try cache, fallback to network
+async function cacheFirstStrategy(request) {
+    const cachedResponse = await caches.match(request);
+    
+    if (cachedResponse) {
+        return cachedResponse;
+    }
+    
+    try {
+        const networkResponse = await fetch(request);
+        
+        if (networkResponse.ok) {
+            const cache = await caches.open(RUNTIME_CACHE);
+            cache.put(request, networkResponse.clone());
+        }
+        
+        return networkResponse;
+    } catch (error) {
+        console.log('Both cache and network failed:', error);
+        throw error;
+    }
+}
+
+// Stale While Revalidate - Return cache immediately, update in background
+async function staleWhileRevalidateStrategy(request) {
+    const cache = await caches.open(RUNTIME_CACHE);
+    const cachedResponse = await cache.match(request);
+    
+    // Fetch from network in background
+    const networkResponsePromise = fetch(request).then(response => {
+        if (response.ok) {
+            cache.put(request, response.clone());
+        }
+        return response;
+    }).catch(error => {
+        console.log('Background update failed:', error);
+    });
+    
+    // Return cached version immediately if available
+    if (cachedResponse) {
+        return cachedResponse;
+    }
+    
+    // Otherwise wait for network
+    return networkResponsePromise;
+}
+
+// Background Sync - Handle offline form submissions
+self.addEventListener('sync', event => {
+    console.log('Background sync triggered:', event.tag);
+    
+    if (event.tag === 'form-submission') {
+        event.waitUntil(syncFormSubmissions());
+    } else if (event.tag === 'data-sync') {
+        event.waitUntil(syncPendingData());
+    }
+});
+
+async function syncFormSubmissions() {
+    // Get pending form submissions from IndexedDB
+    const pendingForms = await getPendingFormSubmissions();
+    
+    for (const form of pendingForms) {
+        try {
+            const response = await fetch('/api/submit', {
+                method: 'POST',
+                body: JSON.stringify(form.data),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                // Remove from pending queue
+                await removePendingFormSubmission(form.id);
+                console.log('Form submitted successfully:', form.id);
+            }
+        } catch (error) {
+            console.log('Form submission failed, will retry:', error);
+        }
+    }
+}
+
+// Push notifications
+self.addEventListener('push', event => {
+    console.log('Push message received:', event);
+    
+    const options = {
+        body: event.data ? event.data.text() : 'New message!',
+        icon: '/images/notification-icon.png',
+        badge: '/images/notification-badge.png',
+        actions: [
+            {
+                action: 'view',
+                title: 'View',
+                icon: '/images/view-icon.png'
+            },
+            {
+                action: 'dismiss',
+                title: 'Dismiss',
+                icon: '/images/dismiss-icon.png'
+            }
+        ],
+        data: {
+            url: '/',
+            timestamp: Date.now()
+        }
+    };
+    
+    event.waitUntil(
+        self.registration.showNotification('My App Notification', options)
+    );
+});
+
+// Handle notification clicks
+self.addEventListener('notificationclick', event => {
+    console.log('Notification clicked:', event);
+    
+    event.notification.close();
+    
+    if (event.action === 'view') {
+        // Open the app
+        event.waitUntil(
+            clients.openWindow(event.notification.data.url)
+        );
+    } else if (event.action === 'dismiss') {
+        // Just close the notification
+        console.log('Notification dismissed');
+    }
+});
+
+// Message handling from main thread
+self.addEventListener('message', event => {
+    console.log('Message received in SW:', event.data);
+    
+    if (event.data.command === 'SKIP_WAITING') {
+        self.skipWaiting();
+    } else if (event.data.command === 'CACHE_URLS') {
+        // Cache specific URLs on demand
+        cacheUrls(event.data.urls);
+    }
+});
+
+async function cacheUrls(urls) {
+    const cache = await caches.open(RUNTIME_CACHE);
+    return cache.addAll(urls);
+}
+
+// Helper functions for IndexedDB operations
+async function getPendingFormSubmissions() {
+    // Implementation would use IndexedDB
+    return [];
+}
+
+async function removePendingFormSubmission(id) {
+    // Implementation would use IndexedDB
+    console.log('Removing pending form:', id);
+}
+
+async function syncPendingData() {
+    // Sync any pending data when connection is restored
+    console.log('Syncing pending data...');
+}
+```
+
+#### Offline Page and Progressive Web App Features
+
+```html
+<!-- offline.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>You're Offline</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .offline-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        .retry-button {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="offline-icon">📡</div>
+        <h1>You're offline</h1>
+        <p>Check your internet connection and try again.</p>
+        <button class="retry-button" onclick="window.location.reload()">
+            Try Again
+        </button>
+    </div>
+</body>
+</html>
+```
+
+#### Using Service Workers for Background Tasks
+
+```javascript
+// app.js - Main application code
+class OfflineFormHandler {
+    constructor() {
+        this.init();
+    }
+    
+    async init() {
+        // Check if service worker and background sync are supported
+        if ('serviceWorker' in navigator && 'sync' in window.ServiceWorkerRegistration.prototype) {
+            this.setupOfflineSupport();
+        }
+    }
+    
+    setupOfflineSupport() {
+        // Handle form submissions
+        document.addEventListener('submit', (event) => {
+            if (!navigator.onLine) {
+                event.preventDefault();
+                this.handleOfflineSubmission(event.target);
+            }
+        });
+        
+        // Show online/offline status
+        window.addEventListener('online', () => {
+            this.showStatus('You\'re back online!', 'success');
+        });
+        
+        window.addEventListener('offline', () => {
+            this.showStatus('You\'re offline. Data will sync when reconnected.', 'warning');
+        });
+    }
+    
+    async handleOfflineSubmission(form) {
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        
+        // Store in IndexedDB for later sync
+        await this.storeOfflineData(data);
+        
+        // Register background sync
+        if ('serviceWorker' in navigator && 'sync' in window.ServiceWorkerRegistration.prototype) {
+            const registration = await navigator.serviceWorker.ready;
+            await registration.sync.register('form-submission');
+        }
+        
+        this.showStatus('Form saved. Will submit when online.', 'info');
+    }
+    
+    async storeOfflineData(data) {
+        // IndexedDB implementation
+        console.log('Storing offline data:', data);
+    }
+    
+    showStatus(message, type) {
+        const statusDiv = document.createElement('div');
+        statusDiv.className = `status ${type}`;
+        statusDiv.textContent = message;
+        document.body.appendChild(statusDiv);
+        
+        setTimeout(() => {
+            statusDiv.remove();
+        }, 3000);
+    }
+}
+
+// Initialize offline support
+new OfflineFormHandler();
 ```
 
 ## Practical Examples
@@ -435,4 +894,4 @@ Web Workers provide true parallel processing in JavaScript by:
 3. **Enabling true multitasking** - Multiple workers can run simultaneously
 4. **Safe concurrency** - No shared memory, only message passing
 
-They're essential for modern web applications that need to perform heavy computations while maintaining a smooth user experience.
+They're essential for modern web applications that need to perform heavy computations while maintaining a smooth user experience. Service Workers extend this capability to provide offline functionality, background sync, push notifications, and advanced caching strategies that enable Progressive Web App features.

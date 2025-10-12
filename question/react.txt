@@ -1,0 +1,98 @@
+
+
+
+--------------------------------
+what are the ways to pass data between the components. 
+
+--------------------------------
+code splitting
+use custom hooks
+
+--------------------------------
+// ❌ Bad: Stale closure issue
+function StaleClosureExample() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCount(count + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []); 
+
+  return <div>Count: {count}</div>;
+}
+
+
+
+--------------------------------
+useEffect vs useLayoutEffect
+
+import { useEffect, useLayoutEffect, useState, useRef } from 'react';
+
+function EffectComparison() {
+  const [count, setCount] = useState(0);
+  const divRef = useRef();
+
+  // useEffect: Runs after DOM painting (asynchronous)
+  useEffect(() => {
+    console.log('useEffect: DOM has been painted');
+    // Good for: API calls, subscriptions, logging
+  }, [count]);
+
+  // useLayoutEffect: Runs before DOM painting (synchronous)
+  useLayoutEffect(() => {
+    console.log('useLayoutEffect: Before DOM painting');
+    
+    // Good for: DOM measurements, synchronous DOM updates
+    if (divRef.current) {
+      const rect = divRef.current.getBoundingClientRect();
+      console.log('Element dimensions:', rect.width, rect.height);
+    }
+  }, [count]);
+
+  return (
+    <div>
+      <div ref={divRef}>Count: {count}</div>
+      <button onClick={() => setCount(c => c + 1)}>
+        Increment
+      </button>
+    </div>
+  );
+}
+--------------------------------
+6. Explain useEffect cleanup timing with multiple effects
+
+function MultipleEffects({ userId, isVisible }) {
+  useEffect(() => {
+    console.log('Effect 1: Setup');
+    return () => console.log('Effect 1: Cleanup');
+  }, [userId]);
+
+  useEffect(() => {
+    console.log('Effect 2: Setup');
+    return () => console.log('Effect 2: Cleanup');
+  }, [isVisible]);
+
+  useEffect(() => {
+    console.log('Effect 3: Setup (no deps)');
+    return () => console.log('Effect 3: Cleanup');
+  });
+
+  return <div>Multiple Effects</div>;
+}
+
+// When userId changes:
+// 1. Effect 1: Cleanup (previous)
+// 2. Effect 1: Setup (new)
+// 3. Effect 3: Cleanup (previous)
+// 4. Effect 3: Setup (new)
+
+// When isVisible changes:
+// 1. Effect 2: Cleanup (previous)
+// 2. Effect 2: Setup (new)
+// 3. Effect 3: Cleanup (previous)
+// 4. Effect 3: Setup (new)
+
+--------------------------------

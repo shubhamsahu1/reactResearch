@@ -1,0 +1,46 @@
+console.log("Start");
+
+setTimeout(() => {
+    console.log("setTimeout 1");
+}, 0);
+
+Promise.resolve().then(() => {
+    console.log("Promise 1");
+    
+    // This creates another
+    Promise.resolve().then(() => {
+        console.log("Nested Promise 2");
+    });
+    
+    // This creates a 
+    setTimeout(() => {
+        console.log("setTimeout 2");
+    }, 0);
+});
+
+setTimeout(() => {
+    console.log("setTimeout 3");
+}, 0);
+
+console.log("End");
+
+
+---------------------------------
+
+const person = {
+    name: 'Alice',
+    age: 30,
+
+    
+    describeSelf: function() {
+        console.log('Outer this:', this.name); 
+        
+        function innerFunction() {
+            console.log('Inner this:', this.name); 
+        }
+        
+        innerFunction();
+    }
+};
+
+person.introduce();

@@ -43,4 +43,18 @@ const person = {
     }
 };
 
-person.introduce();
+person.describeSelf();
+
+----------------------------
+const promise1 = Promise.resolve(10);
+const promise2 = Promise.resolve(20);
+const promise3 = Promise.resolve(30);
+
+Promise.all([promise1, promise2, promise3])
+  .then(results => {
+    console.log(results); 
+    
+  })
+  .catch(error => {
+    console.error( error);
+  });

@@ -76,9 +76,14 @@ function MultipleEffects({ userId, isVisible }) {
   }, [isVisible]);
 
   useEffect(() => {
-    console.log('Effect 3: Setup (no deps)');
+    console.log('Effect 3:');
     return () => console.log('Effect 3: Cleanup');
   });
+
+  useEffect(() => {
+    console.log('Effect 4:');
+    return () => console.log('Effect 4: Cleanup');
+  },[]);
 
   return <div>Multiple Effects</div>;
 }
